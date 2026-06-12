@@ -385,6 +385,11 @@ class Rewriter():
         for dep in self.container.loader.dependencies:
             fd.write(f"// DEPENDENCY: {dep}" + "\n")
 
+        # store the original .text VA so that retrowrite -a can auto-align
+        text_sec = self.container.loader.elffile.get_section_by_name(".text")
+        if text_sec is not None:
+            fd.write(f"// ORIGINAL_TEXT_VA: {hex(text_sec['sh_addr'])}" + "\n")
+
         fd.close()
 
         if Rewriter.literal_saves != Rewriter.total_globals:
