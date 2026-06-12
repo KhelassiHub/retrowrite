@@ -119,8 +119,12 @@ def assemble(filename, outfile):
     wlflags = []
     for sec, addr in secs.items():
         wlflags += ["--section-start="+sec+"="+addr]
-    if any("SYMBOLIC" in x for x in last_lines): 
+    if any("SYMBOLIC" in x for x in last_lines):
         wlflags += ['-Bsymbolic']
+    # force .text to start at the original VA so function addresses are stable
+    if orig_text_va is not None:
+        wlflags += [f"--section-start=.text={hex(orig_text_va)}"]
+        info(f"Forcing .text to original VA: {hex(orig_text_va)}")
     wlflags = "-Wl," + ",".join(wlflags)
     for p in paths:
         wlflags += " -L" + p
@@ -133,44 +137,6 @@ def assemble(filename, outfile):
     if len(shr): pie = ""
 
     asmline = f"{cc} {filename} {shr} {pie} -nostartfiles {lflags} {wlflags} -o {outfile}"
-
-    # ── auto-align .text to match original VA ─────────────────────────────────
-    if orig_text_va is not None:
-        import re as _re
-        def _get_text_va(binary):
-            try:
-                out = subprocess.check_output(["readelf", "-S", "--wide", binary],
-                                              stderr=subprocess.DEVNULL).decode()
-            except Exception:
-                return None
-            for line in out.splitlines():
-                m = _re.search(r'(?<!\S)\.text\s+PROGBITS\s+([0-9a-f]+)', line)
-                if m:
-                    return int(m.group(1), 16)
-            return None
-
-        trial = outfile + "_trial_align"
-        info(f"ORIGINAL_TEXT_VA detected (0x{orig_text_va:x}) — trial assembly to compute NOP padding")
-        subprocess.check_output(asmline.replace(f"-o {outfile}", f"-o {trial}"), shell=True)
-        trial_va = _get_text_va(trial)
-        os.unlink(trial)
-        if trial_va is not None:
-            delta = orig_text_va - trial_va
-            n_nops = delta // 4
-            if n_nops > 0:
-                info(f".text delta: 0x{delta:x} → inserting {n_nops} NOPs into {filename}")
-                with open(filename) as fh:
-                    lines = fh.readlines()
-                for i, line in enumerate(lines):
-                    if line.strip() == ".section .text":
-                        lines = lines[:i+1] + ["\tnop\n"] * n_nops + lines[i+1:]
-                        break
-                with open(filename, "w") as fh:
-                    fh.writelines(lines)
-            else:
-                info(f".text already aligned (delta=0x{delta:x})")
-    # ──────────────────────────────────────────────────────────────────────────
-
     info("Assembling with the following command:")
     print(asmline)
     subprocess.check_output(asmline, shell=True)
